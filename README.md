@@ -78,11 +78,11 @@ When you're done: `just down` (or `docker compose down`).
 │   └── server.mjs                      the service under test (no dependencies) on http://localhost:4100
 ├── tests/                              the test project, created with `npx @esimplicitylabs/katalyst-xspec init`
 │   ├── .env.example                    ← all the auth configuration lives here
-│   ├── playwright.config.ts            scaffolded; only change: a 90 s timeout
+│   ├── playwright.config.ts            scaffolded; a 90 s timeout, no TUI project
 │   ├── features/
 │   │   ├── api/applications.feature    API scenarios (cookie-only API)
 │   │   ├── ui/sign-in.feature          browser scenarios
-│   │   └── steps/                      scaffolded, unchanged: no custom steps
+│   │   └── steps/                      scaffolded: no custom steps (TUI wiring removed)
 │   └── README.md                       how the test project is put together
 ├── justfile                            setup / up / app / test / expire / down
 └── .github/workflows/test.yml          CI: Keycloak + app + tests on every push

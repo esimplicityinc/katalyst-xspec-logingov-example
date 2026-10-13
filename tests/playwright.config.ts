@@ -41,15 +41,6 @@ const uiBdd = defineBddProject({
   tags,
 });
 
-// TUI project (optional - requires tui-tester and tmux; also enable
-// registerTuiSteps in features/steps/steps.ts and createTui in fixtures.ts)
-// const tuiBdd = defineBddProject({
-//   name: 'tui',
-//   features: 'features/tui/**/*.feature',
-//   steps: 'features/steps/**/*.ts',
-//   tags,
-// });
-
 export default defineConfig({
   workers: resolveWorkers(),
   // A login may wait up to one TOTP period (30 s) for a code no other login has used.
@@ -58,8 +49,7 @@ export default defineConfig({
     cucumberReporter('html', { outputFile: 'cucumber-report/index.html' }),
     cucumberReporter('json', { outputFile: 'cucumber-report/report.json' }),
   ],
-  // Add tuiBdd to this array when TUI testing is enabled
-  projects: [apiBdd, uiBdd /* , tuiBdd */],
+  projects: [apiBdd, uiBdd],
   use: {
     baseURL: targets.frontendUrl,
     headless: process.env.HEADLESS === 'false' ? false : true,

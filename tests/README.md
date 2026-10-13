@@ -25,7 +25,7 @@ Reports: `cucumber-report/index.html` (HTML) and `test-results/` (traces of fail
 | [`.env.example`](.env.example) | Login and OTP settings, three roles | The whole auth setup. See below |
 | [`playwright.config.ts`](playwright.config.ts) | `timeout: 90_000` | A sign-in may wait up to one 30 s TOTP window for a code that no other worker has used ([why](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#one-time-passcodes-totp)) |
 | `features/api/`, `features/ui/` | The scaffold's examples replaced with these scenarios | |
-| [`features/steps/`](features/steps/) | **Nothing** | No custom steps or adapters: the built-in ones cover the login, the code page, sessions and cleanup |
+| [`features/steps/`](features/steps/) | Only the unused terminal-UI (TUI) wiring removed | No custom steps or adapters: the built-in ones cover the login, the code page, sessions and cleanup |
 
 ## The settings, explained
 
