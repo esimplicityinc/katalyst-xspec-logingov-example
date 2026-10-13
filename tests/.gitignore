@@ -1,0 +1,9 @@
+node_modules
+.features-gen
+playwright-report
+test-results
+cucumber-report
+storage
+.env
+# katalyst-xspec: saved login sessions (contain session cookies)
+.xspec/

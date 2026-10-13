@@ -1,0 +1,125 @@
+{
+  "realm": "logingov-local",
+  "displayName": "Login.gov (local stand-in)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 900,
+  "ssoSessionMaxLifespan": 3600,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyCodeReusable": false,
+  "requiredActions": [],
+  "clients": [
+    {
+      "clientId": "benefits-app",
+      "name": "Benefits Application (BFF)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "benefits-app-local-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["http://localhost:4100/auth/callback"],
+      "webOrigins": ["http://localhost:4100"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4100/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "ial",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "ial",
+            "claim.name": "ial",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "verified_at",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "verified_at",
+            "claim.name": "verified_at",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "facial@test.local",
+      "email": "facial@test.local",
+      "emailVerified": true,
+      "firstName": "Fran",
+      "lastName": "Facial",
+      "enabled": true,
+      "attributes": { "ial": ["2"], "verified_at": ["2026-01-15T12:00:00Z"] },
+      "credentials": [
+        { "type": "password", "value": "password", "temporary": false },
+        {
+          "type": "otp",
+          "userLabel": "Authentication app",
+          "secretData": "{\"value\":\"logingov-local-otp-secret\"}",
+          "credentialData": "{\"subType\":\"totp\",\"digits\":6,\"counter\":0,\"period\":30,\"algorithm\":\"HmacSHA1\"}"
+        }
+      ]
+    },
+    {
+      "username": "basic@test.local",
+      "email": "basic@test.local",
+      "emailVerified": true,
+      "firstName": "Bea",
+      "lastName": "Basic",
+      "enabled": true,
+      "attributes": { "ial": ["1"] },
+      "credentials": [
+        { "type": "password", "value": "password", "temporary": false },
+        {
+          "type": "otp",
+          "userLabel": "Authentication app",
+          "secretData": "{\"value\":\"logingov-local-otp-secret\"}",
+          "credentialData": "{\"subType\":\"totp\",\"digits\":6,\"counter\":0,\"period\":30,\"algorithm\":\"HmacSHA1\"}"
+        }
+      ]
+    },
+    {
+      "username": "caseworker@test.local",
+      "email": "caseworker@test.local",
+      "emailVerified": true,
+      "firstName": "Casey",
+      "lastName": "Worker",
+      "enabled": true,
+      "attributes": { "ial": ["2"], "verified_at": ["2026-01-15T12:00:00Z"], "role": ["caseworker"] },
+      "credentials": [
+        { "type": "password", "value": "caseworker-password", "temporary": false },
+        {
+          "type": "otp",
+          "userLabel": "Authentication app",
+          "secretData": "{\"value\":\"caseworker-otp-secret\"}",
+          "credentialData": "{\"subType\":\"totp\",\"digits\":6,\"counter\":0,\"period\":30,\"algorithm\":\"HmacSHA1\"}"
+        }
+      ]
+    }
+  ]
+}

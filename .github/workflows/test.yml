@@ -1,0 +1,52 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Start Keycloak (login.gov stand-in)
+        run: docker compose up -d --wait
+
+      - name: Start the service under test
+        run: |
+          node app/server.mjs > app.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:4100/auth/start -w '%{http_code}' && break; sleep 1; done
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          cp .env.example .env
+
+      - name: Run the scenarios
+        working-directory: tests
+        run: WORKERS=4 npm test
+
+      - name: Keycloak and app logs
+        if: failure()
+        run: |
+          docker compose logs keycloak | tail -100
+          cat app.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports
+          path: |
+            tests/cucumber-report
+            tests/test-results
+          if-no-files-found: ignore
