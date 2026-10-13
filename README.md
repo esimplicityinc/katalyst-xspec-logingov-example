@@ -1,5 +1,7 @@
 # katalyst-xspec example: a login.gov-style service with TOTP
 
+[![Test](https://github.com/esimplicityinc/katalyst-xspec-logingov-example/actions/workflows/test.yml/badge.svg)](https://github.com/esimplicityinc/katalyst-xspec-logingov-example/actions/workflows/test.yml)
+
 An example of a project that uses [katalyst-xspec](https://github.com/esimplicityinc/katalyst-xspec) to test a service whose users sign in with **login.gov** and an **authenticator app** (TOTP). Everything runs locally, and [CI](.github/workflows/test.yml) runs the same thing on every push:
 
 | Piece | What it is | Where |
@@ -55,6 +57,7 @@ just down      # stop Keycloak
 Without `just`:
 
 ```bash
+git clone https://github.com/esimplicityinc/katalyst-xspec-logingov-example && cd katalyst-xspec-logingov-example
 docker compose up -d --wait
 node app/server.mjs &
 cd tests && cp .env.example .env && npm install && npx playwright install chromium
