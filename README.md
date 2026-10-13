@@ -2,102 +2,200 @@
 
 [![Test](https://github.com/esimplicityinc/katalyst-xspec-logingov-example/actions/workflows/test.yml/badge.svg)](https://github.com/esimplicityinc/katalyst-xspec-logingov-example/actions/workflows/test.yml)
 
-An example of a project that uses [katalyst-xspec](https://github.com/esimplicityinc/katalyst-xspec) to test a service whose users sign in with **login.gov** and an **authenticator app** (TOTP). Everything runs locally, and [CI](.github/workflows/test.yml) runs the same thing on every push:
+This repo shows how to test a service whose users sign in with **login.gov** and an **authenticator app** (TOTP), using [katalyst-xspec](https://github.com/esimplicityinc/katalyst-xspec). It's a complete, runnable setup:
 
-| Piece | What it is | Where |
-|---|---|---|
-| Identity provider | Keycloak 26, set up like login.gov | `keycloak/logingov-local-realm.json`, `docker-compose.yml` → http://localhost:8180 |
-| Service under test | "Benefits Application", a small BFF (backend-for-frontend) | `app/server.mjs` → http://localhost:4100 |
-| Tests | A katalyst-xspec project (`katalyst-xspec init`), configured only in `.env` | `tests/` |
+- a **local identity provider** (Keycloak) set up to behave like login.gov,
+- a small **service under test** whose login works like a typical login.gov partner app (a BFF),
+- a **test project** that signs in through all of it, one-time codes included, with **no login code written**: just settings in `.env`.
 
-All credentials and secrets in this repo are for local test users only.
+[CI](.github/workflows/test.yml) runs all three on every push.
 
-Library docs: [Apps with a BFF login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication/#apps-with-a-bff-login), [One-time passcodes](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication/#one-time-passcodes-totp), [API calls with the browser session](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication/#api-calls-with-the-browser-session), [Session reuse](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication/#session-reuse).
+> All usernames, passwords and OTP secrets in this repo belong to local test users. They aren't real credentials.
 
-## How it mirrors login.gov
+**Contents:** [The problem](#the-problem-this-solves) · [Quick start](#quick-start) · [What's in the repo](#whats-in-the-repo) · [Where to look first](#where-to-look-first) · [How a run works](#how-a-run-works) · [How it mirrors login.gov](#how-it-mirrors-logingov) · [Using this for your own service](#using-this-for-your-own-service) · [Troubleshooting](#troubleshooting) · [Docs](#further-reading)
 
-| login.gov | Here |
-|---|---|
-| Users sign in with a password, then a second factor; the **authentication app** option is TOTP | Keycloak realm `logingov-local`. Every user has a password and an OTP credential (TOTP, SHA1, 6 digits, 30 s) |
-| A code can be used only once | `otpPolicyCodeReusable: false` |
-| No machine-to-machine logins; only users sign in, through the browser | The client allows the authorization code flow only (no password grant, no service accounts) |
-| Identity verification levels: IAL1 (self-asserted) and IAL2 (verified, incl. facial match) | User attribute `ial` (`1` or `2`) and `verified_at`, put in the ID token as claims |
-| The app asks for a level with `acr_values` | The app sends login.gov's `http://idmanagement.gov/ns/assurance/ial/2` (Keycloak logs a warning and ignores it) |
-| The partner app (here a BFF) exchanges the code on its server, then gives the browser its own session | `/auth/start` → Keycloak → `/auth/callback` (code + PKCE exchanged with a client secret) → `benefits_sid` cookie |
-| The app's API trusts its own session, not login.gov tokens | `/api/*` accepts only the `benefits_sid` cookie, with no bearer tokens |
+---
 
-Test users (all from the realm file):
+## The problem this solves
 
-| User | Password | OTP secret | IAL | Role in the tests |
-|---|---|---|---|---|
-| `facial@test.local` | `password` | `logingov-local-otp-secret` | 2 | `applicant`: can apply |
-| `basic@test.local` | `password` | `logingov-local-otp-secret` | 1 | `unverified`: gets 403 when applying |
-| `caseworker@test.local` | `caseworker-password` | `caseworker-otp-secret` | 2 | `admin`: shows a per-role secret |
+Testing an app behind login.gov is awkward:
 
-Keycloak stores OTP secrets as plain text, so the tests use `AUTH_OTP_ENCODING=latin1` (the same as `OTPAuth.Secret.fromLatin1(...)`). To sign in by hand at http://localhost:4100, add the secret to an authenticator app in its base32 form (`NRXWO2LOM5XXMLLMN5RWC3BNN52HALLTMVRXEZLU` for `logingov-local-otp-secret`), or print a code with:
+1. **Every sign-in needs a one-time code.** login.gov always requires a second factor, so a test has to produce a valid TOTP code, and each code works **only once**.
+2. **There's no machine-to-machine login.** login.gov only signs in people, through a browser. You can't fetch a token for API tests.
+3. **The app owns the session.** Partner apps usually exchange the login.gov code on their own server (a backend-for-frontend, BFF) and give the browser a session cookie. Their API accepts that cookie, not login.gov tokens.
+4. **Parallel tests make it worse.** Workers signing in as the same user at the same moment send the same code, and all but one are rejected.
 
-```bash
-node -e "import('@esimplicitylabs/katalyst-xspec').then(m => console.log(m.generateTotp({ secret: 'logingov-local-otp-secret', encoding: 'latin1' })))"
+The usual result is a hand-written login script, a saved `user.json`, and flaky CI. With katalyst-xspec, the scenarios just say who's signed in:
+
+```gherkin
+Given I am logged in as "applicant"                 # browser, signed in
+Given I am authenticated as "applicant" via API     # API calls carry the same session
 ```
 
-(run that from `tests/`, after `npm install`).
+The library does the rest: it goes through the provider's pages, generates the code, signs each role in **once per run** and shares that session with every worker, sends the session cookie on API calls, and replaces sessions that have expired. See the [Authentication guide](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication).
 
-## Run it
+## Quick start
 
-Needs Docker and Node 20+. With [just](https://github.com/casey/just) installed:
+You need Docker, Node 20+, and (optionally) [just](https://github.com/casey/just).
 
 ```bash
-just setup     # npm install, Chromium, .env from .env.example
-just up        # Keycloak (waits until ready)
-just app       # the BFF on :4100 (leave it running; new terminal for the rest)
-just test      # the scenarios, 4 workers
-just down      # stop Keycloak
+git clone https://github.com/esimplicityinc/katalyst-xspec-logingov-example
+cd katalyst-xspec-logingov-example
+
+just setup     # npm install in tests/, download Chromium, create tests/.env
+just up        # start Keycloak on :8180 and wait until it's ready
+just app       # start the service on :4100 (leave it running)
+just test      # in a second terminal: run the scenarios with 4 workers
 ```
 
 Without `just`:
 
 ```bash
-git clone https://github.com/esimplicityinc/katalyst-xspec-logingov-example && cd katalyst-xspec-logingov-example
 docker compose up -d --wait
 node app/server.mjs &
 cd tests && cp .env.example .env && npm install && npx playwright install chromium
 WORKERS=4 npm test
 ```
 
-## The test project
+You should see `7 passed`. The HTML report is in `tests/cucumber-report/index.html`.
 
-Nothing in `tests/features/steps/` was changed from what `katalyst-xspec init` creates. All the login, TOTP and session handling comes from `tests/.env`:
+To sign in by hand, open http://localhost:4100 and use `facial@test.local` / `password`. For the code, either add the secret `NRXWO2LOM5XXMLLMN5RWC3BNN52HALLTMVRXEZLU` to an authenticator app, or print the current code from `tests/`:
 
 ```bash
-FRONTEND_URL=http://localhost:4100
-UI_LOGIN_PATH=/auth/start          # the login starts at the app's own route
-API_AUTH_MODE=ui-session           # API steps send the browser session's cookie
-UI_SESSION_CHECK_PATH=/            # a saved session that lands on the provider from here has expired
-
-AUTH_APPLICANT_USERNAME=facial@test.local
-AUTH_APPLICANT_PASSWORD=password
-AUTH_UNVERIFIED_USERNAME=basic@test.local
-AUTH_UNVERIFIED_PASSWORD=password
-
-AUTH_OTP_SECRET=logingov-local-otp-secret   # every role's authenticator secret
-AUTH_OTP_ENCODING=latin1
-CLEANUP_AUTH_ROLE=applicant                 # users can only delete their own applications
+node -e "import('@esimplicitylabs/katalyst-xspec').then(m => console.log(m.generateTotp({ secret: 'logingov-local-otp-secret', encoding: 'latin1' })))"
 ```
 
-The scenarios, in `tests/features/`:
+When you're done: `just down` (or `docker compose down`).
 
-- `api/applications.feature`: a verified applicant applies through the cookie-only API, with cleanup; the API reports the IAL; an IAL1 user gets 403; no session gets 401.
-- `ui/sign-in.feature`: a signed-in applicant sees the dashboard; an application created through the API shows up in the UI; and the sign-in itself (password page, then one-time code page) as a test of its own.
+## What's in the repo
 
-What happens in a run:
+```
+.
+├── docker-compose.yml                  Keycloak 26 on http://localhost:8180
+├── keycloak/
+│   └── logingov-local-realm.json       the login.gov stand-in: realm, client, users, OTP policy
+├── app/
+│   └── server.mjs                      the service under test (no dependencies) on http://localhost:4100
+├── tests/                              the test project, created with `npx @esimplicitylabs/katalyst-xspec init`
+│   ├── .env.example                    ← all the auth configuration lives here
+│   ├── playwright.config.ts            scaffolded; only change: a 90 s timeout
+│   ├── features/
+│   │   ├── api/applications.feature    API scenarios (cookie-only API)
+│   │   ├── ui/sign-in.feature          browser scenarios
+│   │   └── steps/                      scaffolded, unchanged: no custom steps
+│   └── README.md                       how the test project is put together
+├── justfile                            setup / up / app / test / expire / down
+└── .github/workflows/test.yml          CI: Keycloak + app + tests on every push
+```
 
-1. The first scenario that needs `applicant` (UI or API, in any worker) takes a lock and signs in through `/auth/start`, Keycloak's password page and its one-time code page, then saves the session to `tests/.xspec/auth/`. API-only scenarios use a headless browser of their own for this.
-2. Every other scenario for that role, in every worker, restores the session. Each role signs in **once per run**.
-3. A login never submits a code that another worker already used for that account. If it would, it waits for the next 30 s window, which is why `playwright.config.ts` sets `timeout: 90_000`.
-4. Cleanup deletes the created applications with the applicant's session.
+## Where to look first
 
-Try the expired-session handling: while a run is going (or between runs with `UI_SESSION_SCOPE=persistent`), log everyone out of the app with `curl -X POST http://localhost:4100/__test/expire-sessions`. The next scenario notices that its saved session lands on Keycloak, signs in again, and saves the new session for the other workers.
+Read these in order.
 
-## Against the real login.gov sandbox
+1. **[`tests/.env.example`](tests/.env.example)**: the entire auth setup. Each line is commented. These are the ones that matter:
 
-The tests wouldn't change. The app would point at `https://idp.int.identitysandbox.gov` (with `private_key_jwt` client authentication, which login.gov requires), and `tests/.env` would get the sandbox test accounts' usernames, passwords and authentication-app secrets. Check login.gov's partner terms before automating sign-ins against the sandbox. For production, use tests that don't sign in, or a test login the app provides.
+   | Setting | What it does | Docs |
+   |---|---|---|
+   | `UI_LOGIN_PATH=/auth/start` | The login starts at the app's own route, which sends the browser to the provider | [Apps with a BFF login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#apps-with-a-bff-login) |
+   | `FRONTEND_URL` | Pages outside this origin count as "still signing in" (the provider) | [UI login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#ui-login) |
+   | `AUTH_<ROLE>_USERNAME` / `_PASSWORD` | One pair per role: `applicant`, `unverified`, `admin` | [Credentials](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#credentials) |
+   | `AUTH_OTP_SECRET`, `AUTH_OTP_ENCODING=latin1` | The authenticator secret, for generating codes | [One-time passcodes](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#one-time-passcodes-totp) |
+   | `API_AUTH_MODE=ui-session` | API steps send the browser session's cookie, because the API accepts nothing else | [API calls with the browser session](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#api-calls-with-the-browser-session) |
+   | `UI_SESSION_CHECK_PATH=/` | How a saved session is checked before reuse | [Session reuse](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#session-reuse) |
+   | `CLEANUP_AUTH_ROLE=applicant` | Who deletes test data after each scenario | [Cleanup authentication](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#cleanup-authentication) |
+
+2. **[`tests/features/api/applications.feature`](tests/features/api/applications.feature)** and **[`tests/features/ui/sign-in.feature`](tests/features/ui/sign-in.feature)**: what the scenarios look like. They're all built-in steps:
+
+   | Step | Docs |
+   |---|---|
+   | `Given I am logged in as "applicant"` | [UI steps](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/ui-steps#given-i-am-logged-in-as-string) |
+   | `When I log in as "unverified" in UI` (always signs in, for testing the login itself) | [UI steps](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/ui-steps#when-i-log-in-as-string-in-ui) |
+   | `Given I am authenticated as "applicant" via API` | [API steps](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/api-steps#given-i-am-authenticated-as-string-via-api) |
+   | `When I POST "/api/applications" with JSON body:` | [API steps](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/api-steps#when-i-post-string-with-json-body) |
+   | `And I register cleanup DELETE "/api/applications/{applicationId}"` | [Shared steps](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/shared-steps#given-i-register-cleanup-delete-string) |
+
+3. **[`keycloak/logingov-local-realm.json`](keycloak/logingov-local-realm.json)**: how the provider is set up (see [How it mirrors login.gov](#how-it-mirrors-logingov)).
+
+4. **[`app/server.mjs`](app/server.mjs)**: the login routes (`/auth/start`, `/auth/callback`) and the cookie-only API. Read it to see what "BFF" means in practice (under 200 lines).
+
+## How a run works
+
+```
+ worker 1 ─┐                          ┌──────────────────────────────────────────────┐
+ worker 2 ─┼─ "I am logged in as      │  first worker to need "applicant":            │
+ worker 3 ─┤   applicant"             │   takes a lock in tests/.xspec/auth/          │
+ worker 4 ─┘                          │   /auth/start → Keycloak password page        │
+                                      │   → one-time code page (generated TOTP)       │
+                                      │   → /auth/callback → session cookie           │
+                                      │   saves the session, releases the lock        │
+                                      └──────────────────────────────────────────────┘
+            everyone else: waits for the lock, then restores the saved session
+```
+
+1. **Once per role per run.** The first scenario that needs a role, in any worker, takes a lock and signs in. The others wait and then reuse the session it saved to `tests/.xspec/auth/` (git-ignored, readable only by you). With 7 scenarios and 4 workers, Keycloak sees one sign-in per role. → [Session reuse](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#session-reuse)
+2. **Page by page.** The sign-in fills whatever each page asks for (username and password, then the one-time code) until the browser is back on the app. → [UI login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#ui-login)
+3. **No code is used twice.** Workers record which 30-second window they last used for each account. A sign-in that would reuse a code waits for the next window instead, which is why `playwright.config.ts` raises the timeout to 90 s. → [One-time passcodes](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#one-time-passcodes-totp)
+4. **API scenarios use the same session.** With `API_AUTH_MODE=ui-session`, `I am authenticated as "applicant" via API` sends the saved session's cookie. If no session exists yet, it signs in through a headless browser of its own, so API-only scenarios don't need one. → [API calls with the browser session](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#api-calls-with-the-browser-session)
+5. **Expired sessions are replaced.** Before reusing a session, the library loads `UI_SESSION_CHECK_PATH`. If that ends up on Keycloak, the session has expired, and the role signs in again. Try it: run `just expire` during a run. → [Session reuse](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#session-reuse)
+6. **Cleanup** deletes what the scenarios created, as `CLEANUP_AUTH_ROLE`, using the same session. → [Cleanup authentication](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#cleanup-authentication)
+7. **Nothing leaks.** Cookies and tokens are redacted in error messages and reports. → [Keeping secrets out of logs and git](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#keeping-secrets-out-of-logs-and-git)
+
+## How it mirrors login.gov
+
+| login.gov | This repo | Where |
+|---|---|---|
+| Password, then a second factor; the **authentication app** option is TOTP (SHA1, 6 digits, 30 s) | Every user has a password and an OTP credential with that policy | realm: `otpPolicy*`, users' `credentials` |
+| Each code works once | `otpPolicyCodeReusable: false` | realm |
+| Only people sign in, in a browser; no password grant, no service accounts | The client allows the authorization code flow only | realm: `clients[0]` |
+| The partner app authenticates with a private key and uses PKCE | Client secret here (simpler locally), plus PKCE | `app/server.mjs` `/auth/callback` |
+| Identity assurance: IAL1 (self-asserted), IAL2 (verified, incl. facial match) | User attributes `ial` and `verified_at`, mapped into the ID token | realm: `attributes`, `protocolMappers` |
+| The app asks for a level with `acr_values` | The app sends login.gov's IAL2 URN (Keycloak logs a warning and ignores it) | `app/server.mjs` `/auth/start` |
+| The app keeps its own session; its API trusts that, not login.gov tokens | `benefits_sid` cookie; `/api/*` returns 401 without it | `app/server.mjs` |
+
+Test users:
+
+| User | Password | OTP secret | IAL | Role in the tests |
+|---|---|---|---|---|
+| `facial@test.local` | `password` | `logingov-local-otp-secret` | 2 | `applicant`: can apply |
+| `basic@test.local` | `password` | `logingov-local-otp-secret` | 1 | `unverified`: gets 403 when applying |
+| `caseworker@test.local` | `caseworker-password` | `caseworker-otp-secret` | 2 | `admin`: shows a per-role secret (not used by the features) |
+
+**Why `AUTH_OTP_ENCODING=latin1`?** Keycloak stores an OTP secret as plain text and uses its bytes as the key. Authenticator apps show the same secret in base32. `latin1` tells katalyst-xspec to use the text as-is, the same as `OTPAuth.Secret.fromLatin1(...)` in the `otpauth` library. With a base32 secret, from a QR code or login.gov, leave the encoding unset.
+
+## Using this for your own service
+
+1. **Create a test project:** `npx @esimplicitylabs/katalyst-xspec init my-tests` ([Quick start](https://esimplicityinc.github.io/katalyst-xspec/docs/getting-started/quick-start)).
+2. **Copy the auth part of [`tests/.env.example`](tests/.env.example)** and change:
+   - `FRONTEND_URL` to your app, and `UI_LOGIN_PATH` to the route that starts its login,
+   - the `AUTH_<ROLE>_*` users and their OTP secrets,
+   - `UI_SESSION_CHECK_PATH` to a page that needs a login.
+3. **If your API accepts only the app's session**, keep `API_AUTH_MODE=ui-session`. If it accepts bearer tokens from an identity provider you control, see [OIDC login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#oidc-login) instead.
+4. **Raise Playwright's `timeout`** to at least 60 s if the same account may sign in more than once per run.
+5. **Run it in CI:** start your app and its identity provider, then `npm test`. See [`.github/workflows/test.yml`](.github/workflows/test.yml) and the [CI/CD guide](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/ci-cd).
+
+**Against the real login.gov sandbox** (`idp.int.identitysandbox.gov`), the tests don't change. Your app points at the sandbox, and `.env` gets the sandbox test accounts and their authentication-app secrets (base32, so no `AUTH_OTP_ENCODING`). Check login.gov's partner terms before automating sign-ins there. In production, prefer tests that don't sign in, or a test login your app provides.
+
+**Login pages the built-in sign-in can't handle** (CAPTCHA, SMS, custom widgets): codes can also come from email or a function you supply ([Codes from email or elsewhere](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#codes-from-email-or-elsewhere)), or you can override the login and keep everything else ([Extending the login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#extending-the-login)).
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `the one-time code was rejected twice` | Wrong secret or encoding, or the clock is off | Check `AUTH_OTP_SECRET` / `AUTH_OTP_ENCODING` against the realm; sync the machine clock |
+| `asks for a one-time code. Set AUTH_X_OTP_SECRET` | The role has no OTP secret | Set `AUTH_<ROLE>_OTP_SECRET`, or `AUTH_OTP_SECRET` for every role |
+| `the password was asked for again (the page says "Invalid username or password.")` | Wrong `AUTH_<ROLE>_PASSWORD` | Compare with the realm's users |
+| `Test timeout of 30000ms exceeded` during a login | A login waited for a fresh code | Keep `timeout: 90_000` in `playwright.config.ts` |
+| `connect ECONNREFUSED 127.0.0.1:4100` | The app isn't running | `just app` |
+| Login page never loads | Keycloak isn't ready | `just up` waits for it; `docker compose logs keycloak` |
+| Strange results after changing users | An old saved session | `rm -rf tests/.xspec` |
+
+More in the [library's troubleshooting table](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#troubleshooting).
+
+## Further reading
+
+- [Authentication guide](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication): everything above, in depth
+- [Configuration reference](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/api/configuration#authentication): every setting
+- [Steps quick reference](https://esimplicityinc.github.io/katalyst-xspec/docs/reference/steps/quick-reference): every built-in step
+- [Hybrid testing](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/hybrid-testing): mixing API and UI steps in one scenario
+- [Best practices](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/best-practices): organizing features, test data and auth
+- [katalyst-xspec on GitHub](https://github.com/esimplicityinc/katalyst-xspec) · [on npm](https://www.npmjs.com/package/@esimplicitylabs/katalyst-xspec)
