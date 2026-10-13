@@ -48,6 +48,8 @@ export default defineConfig({
   reporter: [
     cucumberReporter('html', { outputFile: 'cucumber-report/index.html' }),
     cucumberReporter('json', { outputFile: 'cucumber-report/report.json' }),
+    // For CI test reports (GitLab's artifacts:reports:junit).
+    ...(process.env.CI ? [cucumberReporter('junit', { outputFile: 'cucumber-report/junit.xml' })] : []),
   ],
   projects: [apiBdd, uiBdd],
   use: {

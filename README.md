@@ -8,11 +8,11 @@ This repo shows how to test a service whose users sign in with **login.gov** and
 - a small **service under test** whose login works like a typical login.gov partner app (a BFF),
 - a **test project** that signs in through all of it, one-time codes included, with **no login code written**: just settings in `.env`.
 
-[CI](.github/workflows/test.yml) runs all three on every push.
+CI runs all three on every push: there's a [GitHub Actions workflow](.github/workflows/test.yml) and a [GitLab CI equivalent](.gitlab-ci.yml) (see [Running in CI](#running-in-ci)).
 
 > All usernames, passwords and OTP secrets in this repo belong to local test users. They aren't real credentials.
 
-**Contents:** [The problem](#the-problem-this-solves) · [Quick start](#quick-start) · [What's in the repo](#whats-in-the-repo) · [Where to look first](#where-to-look-first) · [How a run works](#how-a-run-works) · [How it mirrors login.gov](#how-it-mirrors-logingov) · [Using this for your own service](#using-this-for-your-own-service) · [Troubleshooting](#troubleshooting) · [Docs](#further-reading)
+**Contents:** [The problem](#the-problem-this-solves) · [Quick start](#quick-start) · [What's in the repo](#whats-in-the-repo) · [Where to look first](#where-to-look-first) · [How a run works](#how-a-run-works) · [How it mirrors login.gov](#how-it-mirrors-logingov) · [Running in CI](#running-in-ci) · [Using this for your own service](#using-this-for-your-own-service) · [Troubleshooting](#troubleshooting) · [Docs](#further-reading)
 
 ---
 
@@ -85,7 +85,11 @@ When you're done: `just down` (or `docker compose down`).
 │   │   └── steps/                      scaffolded: no custom steps (TUI wiring removed)
 │   └── README.md                       how the test project is put together
 ├── justfile                            setup / up / app / test / expire / down
-└── .github/workflows/test.yml          CI: Keycloak + app + tests on every push
+├── .github/workflows/test.yml          GitHub Actions: Keycloak + app + tests on every push
+├── .gitlab-ci.yml                      the same for GitLab CI
+└── ci/
+    ├── import-realm.mjs                creates the realm through Keycloak's admin API (GitLab)
+    └── wait-for.mjs                    waits for Keycloak / the app to answer
 ```
 
 ## Where to look first
@@ -162,6 +166,22 @@ Test users:
 
 **Why `AUTH_OTP_ENCODING=latin1`?** Keycloak stores an OTP secret as plain text and uses its bytes as the key. Authenticator apps show the same secret in base32. `latin1` tells katalyst-xspec to use the text as-is, the same as `OTPAuth.Secret.fromLatin1(...)` in the `otpauth` library. With a base32 secret, from a QR code or login.gov, leave the encoding unset.
 
+## Running in CI
+
+Both pipelines do the same thing: start Keycloak, start the app, run `npm test` with 4 workers, and keep the reports.
+
+| | GitHub Actions ([`.github/workflows/test.yml`](.github/workflows/test.yml)) | GitLab CI ([`.gitlab-ci.yml`](.gitlab-ci.yml)) |
+|---|---|---|
+| Keycloak | `docker compose up -d --wait`, same as locally | A [service container](https://docs.gitlab.com/ci/services/) with the alias `keycloak` |
+| Realm | Imported at startup from `keycloak/` (mounted into the container) | Created by [`ci/import-realm.mjs`](ci/import-realm.mjs) through the admin API, because service containers can't mount repo files |
+| Keycloak's address | `http://localhost:8180` | `http://keycloak:8180`, so the job sets `OIDC_ISSUER` for the app. The browser and the app both use that name, so the issuer matches |
+| Browser | `npx playwright install --with-deps chromium` on `ubuntu-latest` | The `mcr.microsoft.com/playwright` image (keep its tag near the `@playwright/test` version in `tests/package-lock.json`) |
+| Reports | `cucumber-report/` and `test-results/` as an artifact | The same, plus `cucumber-report/junit.xml` as a JUnit report, so results show in merge requests |
+
+The tests and `.env` are identical in both. Only the way Keycloak is started differs. The GitLab job has been checked by running its script in the Playwright image, with Keycloak on a separate container network reachable only as `keycloak` (the way GitLab runs services): 7/7 pass.
+
+The test credentials come from `.env.example`. For a real service, keep passwords and OTP secrets in [GitHub secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions) / [GitLab CI/CD variables](https://docs.gitlab.com/ci/variables/) (masked and protected), and pass them in as `AUTH_<ROLE>_*` environment variables instead of committing them. More in the [CI/CD guide](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/ci-cd).
+
 ## Using this for your own service
 
 1. **Create a test project:** `npx @esimplicitylabs/katalyst-xspec init my-tests` ([Quick start](https://esimplicityinc.github.io/katalyst-xspec/docs/getting-started/quick-start)).
@@ -171,7 +191,7 @@ Test users:
    - `UI_SESSION_CHECK_PATH` to a page that needs a login.
 3. **If your API accepts only the app's session**, keep `API_AUTH_MODE=ui-session`. If it accepts bearer tokens from an identity provider you control, see [OIDC login](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/authentication#oidc-login) instead.
 4. **Raise Playwright's `timeout`** to at least 60 s if the same account may sign in more than once per run.
-5. **Run it in CI:** start your app and its identity provider, then `npm test`. See [`.github/workflows/test.yml`](.github/workflows/test.yml) and the [CI/CD guide](https://esimplicityinc.github.io/katalyst-xspec/docs/guides/ci-cd).
+5. **Run it in CI:** start your app and its identity provider, then `npm test`. See [Running in CI](#running-in-ci).
 
 **Against the real login.gov sandbox** (`idp.int.identitysandbox.gov`), the tests don't change. Your app points at the sandbox, and `.env` gets the sandbox test accounts and their authentication-app secrets (base32, so no `AUTH_OTP_ENCODING`). Check login.gov's partner terms before automating sign-ins there. In production, prefer tests that don't sign in, or a test login your app provides.
 
