@@ -24,6 +24,18 @@ test workers="4":
 expire:
     curl -s -X POST http://localhost:4100/__test/expire-sessions
 
+# Next.js + BFF example: the BFF on http://localhost:8000
+bff:
+    node bff/server.mjs
+
+# Next.js + BFF example: the frontend on http://localhost:3000 (proxies /v1/* to the BFF)
+web:
+    cd web && npm install && npm run dev
+
+# Next.js + BFF example: run its scenarios (needs `just up`, `just bff`, `just web`)
+nextjs-test workers="4":
+    cd nextjs-tests && (test -f .env || cp .env.example .env) && npm install && WORKERS={{workers}} npm test
+
 # Stop Keycloak
 down:
     docker compose down

@@ -17,7 +17,7 @@
     "keycloak:down": "docker compose -f ../docker-compose.yml down"
   },
   "devDependencies": {
-    "@esimplicitylabs/katalyst-xspec": "^0.19.2",
+    "@esimplicitylabs/katalyst-xspec": "^0.19.3",
     "@playwright/test": "^1.49.0",
     "dotenv": "^16.1.4",
     "playwright-bdd": "^9.1.0",
