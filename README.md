@@ -67,6 +67,33 @@ node -e "import('@esimplicitylabs/katalyst-xspec').then(m => console.log(m.gener
 
 When you're done: `just down` (or `docker compose down`).
 
+## Second example: a Next.js frontend with a separate BFF
+
+A setup closer to many real partner apps: a **Next.js** frontend on `:3000` and a **BFF** API on `:8000`. The browser only talks to the frontend, which passes `/v1/*` to the BFF, so the BFF's login routes and its `__Host-ses` session cookie live on the frontend's origin. Changing API requests also need a CSRF token: `GET /v1/application` sends it as the `X-CSRFToken` response header, and the BFF wants it back in the same header.
+
+```
+web/                 Next.js app (a permit renewal service): landing page ("Get Started" link), onboarding, /application/
+bff/server.mjs       the BFF (no dependencies): /v1/auth/start/, /v1/auth/callback/, /v1/application, CSRF
+nextjs-tests/      the test project
+```
+
+```bash
+just up            # Keycloak (same realm; it has a permits-bff client)
+just bff           # BFF on :8000
+just web           # Next.js on :3000
+just nextjs-test   # in another terminal
+```
+
+The test settings are in [`nextjs-tests/.env.example`](nextjs-tests/.env.example): `UI_LOGIN_PATH=/v1/auth/start`, `API_AUTH_MODE=ui-session`, and `UI_SESSION_CHECK_PATH=/v1/application/`. The landing page is public, so `/` can't tell that a saved session has expired. The scenarios:
+
+- **[`api/application.feature`](nextjs-tests/features/api/application.feature)**: signs in, reads the CSRF token from `GET /v1/application`, and `PUT`s the applicant's details. `I store the CSRF token as "csrf"` is a small custom step in [`steps.ts`](nextjs-tests/features/steps/steps.ts). It finds the token in a response header, cookie or JSON field; `I set header "X-CSRFToken" to "{csrf}"` then sends it. If your BFF puts the token in the JSON body, the built-in `I store the value at "<field>" as "csrf"` does the same with no custom step.
+- **[`ui/login.feature`](nextjs-tests/features/ui/login.feature)**: the whole sign-in in the browser (password page, then the one-time code page).
+- **[`ui/home-page.feature`](nextjs-tests/features/ui/home-page.feature)**: clicks "Get Started". It's a link with a different `aria-label`, plus a hidden copy for small screens, so a `"label"` locator doesn't find it.
+
+Notes:
+- **CSRF token in the JSON instead?** Start the BFF with `CSRF_IN=body` and it returns the token as `csrfToken` in the JSON. The built-in `I store the value at "csrfToken" as "csrf"` then replaces the custom step.
+- **CI:** the GitHub Actions workflow runs this example after the first one. The GitLab pipeline runs only the first example.
+
 ## What's in the repo
 
 ```

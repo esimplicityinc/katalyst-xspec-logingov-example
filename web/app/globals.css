@@ -1,0 +1,10 @@
+body { font-family: system-ui, sans-serif; margin: 0; color: #1b1b1b; }
+.banner { background: #162e51; padding: 1rem 2rem; }
+.brand { color: #fff; font-weight: 700; text-decoration: none; }
+main { max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+.button { display: inline-block; background: #005ea2; color: #fff; padding: .75rem 1.25rem; border-radius: .25rem; text-decoration: none; font-weight: 700; border: 0; font-size: 1rem; cursor: pointer; }
+.button:hover { background: #1a4480; }
+.mobile-only { display: none; }
+@media (max-width: 40em) { .mobile-only { display: inline-block; } .desktop-only { display: none; } }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+dt { font-weight: 700; }

@@ -36,11 +36,25 @@ jobs:
         working-directory: tests
         run: WORKERS=4 npm test
 
+      - name: Start the Next.js + BFF example (BFF on :8000, Next.js on :3000)
+        run: |
+          node bff/server.mjs > bff.log 2>&1 &
+          (cd web && npm ci && npm run build && npm start > ../web.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3000/ && break; sleep 1; done
+
+      - name: Run the Next.js + BFF example's scenarios
+        working-directory: nextjs-tests
+        run: |
+          npm ci
+          cp .env.example .env
+          WORKERS=4 npm test
+
       - name: Keycloak and app logs
         if: failure()
         run: |
           docker compose logs keycloak | tail -100
           cat app.log
+          cat bff.log web.log || true
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -49,4 +63,6 @@ jobs:
           path: |
             tests/cucumber-report
             tests/test-results
+            nextjs-tests/cucumber-report
+            nextjs-tests/test-results
           if-no-files-found: ignore

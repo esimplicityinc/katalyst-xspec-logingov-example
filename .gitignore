@@ -5,3 +5,8 @@ playwright-report
 cucumber-report
 .features-gen
 .xspec/
+
+# Next.js
+.next/
+next-env.d.ts
+web/AGENTS.md
